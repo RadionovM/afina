@@ -19,13 +19,10 @@ class SimpleLRU : public Afina::Storage {
 public:
     SimpleLRU(size_t max_size = 1024) : _max_size(max_size), current_size(0) {}
 
-    ~SimpleLRU() 
-    {
+    ~SimpleLRU() {
         _lru_index.clear();
         auto del = _lru_head ? _lru_head->prev : nullptr;
-        while(del != _lru_head.get())
-        {
-            //fprintf(stderr,"while\n");
+        while (del != _lru_head.get()) {
             auto prev = del->prev;
             prev->next.reset();
             del = prev;
@@ -50,19 +47,17 @@ public:
 
 private:
     struct lru_node;
-    using node_map = std::map<std::reference_wrapper<const std::string>,
-                            std::reference_wrapper<lru_node>, std::less<std::string>>;
+    using node_map =
+        std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>;
 
     bool _put(const std::string &key, const std::string &value, node_map::iterator it);
 
     // LRU cache node
-    struct lru_node 
-    {
-        lru_node(const std::string& key, const std::string& value)
-             : key(key), value(value), prev(nullptr) {}
+    struct lru_node {
+        lru_node(const std::string &key, const std::string &value) : key(key), value(value), prev(nullptr) {}
         const std::string key;
         std::string value;
-        lru_node* prev;
+        lru_node *prev;
         std::unique_ptr<lru_node> next;
     };
 
