@@ -94,7 +94,7 @@ void ServerImpl::Join() {
     _thread.join();
     close(_server_socket);
     std::unique_lock<std::mutex> lock(mutex);
-    while (client_sockets.size()) {
+    while (!client_sockets.empty()) {
         stop_working.wait(lock);
     }
 }
@@ -245,7 +245,7 @@ void ServerImpl::client_worker(int client_socket) {
     close(client_socket);
     std::unique_lock<std::mutex> lock(mutex);
     client_sockets.erase(client_socket);
-    if (!client_sockets.size()) {
+    if (client_sockets.empty()) {
         stop_working.notify_all();
     }
 }
