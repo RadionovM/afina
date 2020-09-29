@@ -9,7 +9,6 @@
 #include "protocol/Parser.h"
 #include <afina/execute/Command.h>
 #include <afina/network/Server.h>
-#include <afina/network/ThreadPool.h>
 
 namespace spdlog {
 class logger;
@@ -60,7 +59,6 @@ private:
     std::thread _thread;
 
     std::set<int> client_sockets;
-    std::unique_ptr<ThreadPool> client_threads; // include/afina/network/ThreadPool.h
     std::condition_variable stop_working;
     std::mutex mutex;
     uint32_t n_accept;

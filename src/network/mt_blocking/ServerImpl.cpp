@@ -35,11 +35,8 @@ ServerImpl::~ServerImpl() {}
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
-    this->n_accept = n_accept;
+    // n_accept isnt used
     this->n_workers = n_workers;
-    // пул тредов. У него свои блокировки внутри. при выполнении одного треда
-    // отсылает stop_working.notify_all
-    client_threads.reset(new ThreadPool(n_workers, stop_working));
     _logger = pLogging->select("network");
     _logger->info("Start mt_blocking network service");
 
@@ -89,7 +86,6 @@ void ServerImpl::Stop() {
     for (auto client_socket : client_sockets) {
         shutdown(client_socket, SHUT_RD);
     }
-    lock.unlock();
 }
 
 // See Server.h
@@ -97,12 +93,10 @@ void ServerImpl::Join() {
     assert(_thread.joinable());
     _thread.join();
     close(_server_socket);
-    while (client_threads->get_working_number()) //внутри пула свой мьютекс
-    {
-        std::unique_lock<std::mutex> lock(mutex); //по сути тут лок не нужен (?)
-        stop_working.wait(lock);                  //по сути тут лок не нужен (?)
+    std::unique_lock<std::mutex> lock(mutex);
+    while (client_sockets.size()) {
+        stop_working.wait(lock);
     }
-    client_threads.reset(); // все треды джойнятся
 }
 
 // See Server.h
@@ -119,19 +113,9 @@ void ServerImpl::OnRun() {
         int client_socket;
         struct sockaddr client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
-        {
-            std::unique_lock<std::mutex> lock(mutex);
-            if (client_sockets.size() > n_accept) {
-                continue;
-            }
-        }
         if ((client_socket = accept(_server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
             continue;
         }
-        std::unique_lock<std::mutex> lock(mutex);
-        client_sockets.insert(client_socket);
-        lock.unlock();
-        fprintf(stderr, "Accept\n");
 
         // Got new connection
         if (_logger->should_log(spdlog::level::debug)) {
@@ -153,24 +137,16 @@ void ServerImpl::OnRun() {
             tv.tv_usec = 0;
             setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv);
         }
-        if (client_threads->get_working_number() < n_workers) {
-            fprintf(stderr, "Send task %d , n_workers %d\n", client_threads->get_working_number() >= n_workers);
-            std::function<void(int)> f = [this](int client_socket) { this->client_worker(client_socket); };
-            client_threads->exec(f, client_socket);
-        } else {
-            //        _logger->error("Too many clieant connections");
-            close(client_socket);
+        {
             std::unique_lock<std::mutex> lock(mutex);
-            client_sockets.erase(client_socket);
-            lock.unlock();
-        }
-        // TODO: Start new thread and process data from/to connection
-        /*{
-            static const std::string msg = "TODO: start new thread and process memcached protocol instead";
-            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
-                _logger->error("Failed to write response to client: {}", strerror(errno));
+            if (client_sockets.size() < n_workers) {
+                client_sockets.insert(client_socket);
+                std::thread(&ServerImpl::client_worker, this, client_socket).detach();
+            } else {
+                //_logger->error("Too many clieant connections");
+                close(client_socket);
             }
-        }*/
+        }
     }
 
     // Cleanup on exit...
@@ -269,7 +245,9 @@ void ServerImpl::client_worker(int client_socket) {
     close(client_socket);
     std::unique_lock<std::mutex> lock(mutex);
     client_sockets.erase(client_socket);
-    lock.unlock();
+    if (!client_sockets.size()) {
+        stop_working.notify_all();
+    }
 }
 
 } // namespace MTblocking
