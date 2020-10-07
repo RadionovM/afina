@@ -20,20 +20,17 @@ namespace Backend {
  *
  */
 class StripedLRU : public Afina::Storage {
-public:
-    StripedLRU(std::size_t stripe_count, size_t max_size = 1024)
+    friend StripedLRU* buildStripeStorage(std::size_t stripe_count, size_t max_size);
+
+    StripedLRU(std::size_t stripe_count, size_t striped_max_size)
         : stripe_count(stripe_count) // 1024 байт?
     {
-        std::size_t stripe_limit = max_size / stripe_count;
-        if (stripe_limit < 200) // 200 байт ?
-        {
-            throw std::runtime_error("Small storage size for one stripe: " + std::to_string(stripe_limit));
-        }
-
         for (std::size_t i = 0; i < stripe_count; ++i) {
-            shards.emplace_back(new ThreadSafeSimplLRU(max_size / stripe_count));
+            shards.emplace_back(new ThreadSafeSimplLRU(striped_max_size));
         }
     }
+
+public:
     ~StripedLRU() {}
 
     // see SimpleLRU.h
@@ -64,6 +61,18 @@ private:
     std::vector<std::unique_ptr<ThreadSafeSimplLRU>> shards;
     std::hash<std::string> hash;
 };
+
+StripedLRU* buildStripeStorage(std::size_t stripe_count, size_t max_size = 2*1024*1024)
+{
+   // calculations
+        std::size_t stripe_limit = max_size / stripe_count;
+        if (stripe_limit < 2*1024*1024)
+        {
+            throw std::runtime_error("Small storage size for one stripe: " + std::to_string(stripe_limit));
+        }
+
+   return new StripedLRU(stripe_count, stripe_limit);
+}
 } // namespace Backend
 } // namespace Afina
 
