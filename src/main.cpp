@@ -22,6 +22,7 @@
 #include "network/st_nonblocking/ServerImpl.h"
 
 #include "storage/SimpleLRU.h"
+#include "storage/StripedLRU.h"
 #include "storage/ThreadSafeSimpleLRU.h"
 
 using namespace Afina;
@@ -55,6 +56,8 @@ public:
             storage = std::make_shared<Afina::Backend::SimpleLRU>();
         } else if (storage_type == "mt_lru") {
             storage = std::make_shared<Afina::Backend::ThreadSafeSimplLRU>();
+        } else if (storage_type == "mt_slru") {
+            storage.reset(Afina::Backend::buildStripeStorage(4, 8*2*1024*1024)); // shards_count
         } else {
             throw std::runtime_error("Unknown storage type");
         }
