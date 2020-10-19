@@ -9,6 +9,7 @@
 #include "protocol/Parser.h"
 #include <afina/execute/Command.h>
 #include <afina/network/Server.h>
+#include <afina/concurrency/Executor.h>
 
 namespace spdlog {
 class logger;
@@ -63,6 +64,7 @@ private:
     std::mutex mutex;
     uint32_t n_accept;
     uint32_t n_workers;
+    std::unique_ptr<Afina::Concurrency::Executor> thread_pool;
 };
 
 } // namespace MTblocking

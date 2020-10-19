@@ -76,12 +76,14 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
 
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
+    thread_pool.reset(new Afina::Concurrency::Executor(2,8,10,1000000));
 }
 
 // See Server.h
 void ServerImpl::Stop() {
     running.store(false);
     shutdown(_server_socket, SHUT_RDWR);
+    thread_pool->Stop();
     std::unique_lock<std::mutex> lock(mutex);
     for (auto client_socket : client_sockets) {
         shutdown(client_socket, SHUT_RD);
@@ -93,10 +95,11 @@ void ServerImpl::Join() {
     assert(_thread.joinable());
     _thread.join();
     close(_server_socket);
+    /*
     std::unique_lock<std::mutex> lock(mutex);
     while (!client_sockets.empty()) {
         stop_working.wait(lock);
-    }
+    }*/
 }
 
 // See Server.h
@@ -140,10 +143,16 @@ void ServerImpl::OnRun() {
         {
             std::unique_lock<std::mutex> lock(mutex);
             if (client_sockets.size() < n_workers) {
+                if(!thread_pool->Execute(&ServerImpl::client_worker, this, client_socket))
+                {
+                    _logger->error("Too many client connections");
+                    close(client_socket);
+                }
+                else{
                 client_sockets.insert(client_socket);
-                std::thread(&ServerImpl::client_worker, this, client_socket).detach();
+                }
             } else {
-                //_logger->error("Too many clieant connections");
+                _logger->error("Too many client connections");
                 close(client_socket);
             }
         }
@@ -245,9 +254,6 @@ void ServerImpl::client_worker(int client_socket) {
     close(client_socket);
     std::unique_lock<std::mutex> lock(mutex);
     client_sockets.erase(client_socket);
-    if (client_sockets.empty()) {
-        stop_working.notify_all();
-    }
 }
 
 } // namespace MTblocking

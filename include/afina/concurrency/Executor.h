@@ -15,7 +15,10 @@ namespace Concurrency {
 /**
  * # Thread pool
  */
+class Executor;
+void perform(Executor *executor);
 class Executor {
+    public:
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
@@ -28,8 +31,72 @@ class Executor {
         kStopped
     };
 
-    Executor(std::string name, int size);
-    ~Executor();
+    /**
+     * Main function that all pool threads are running. It polls internal task queue and execute tasks
+     */
+//    friend void perform(Executor *executor);
+    Executor(std::size_t low_watermark, std::size_t hight_watermark, std::size_t max_queue_size, std::size_t idle_time) :
+    state(State::kRun),low_watermark(low_watermark), hight_watermark(hight_watermark), max_queue_size(max_queue_size), idle_time(idle_time), thread_count(0),worked_threads(0)
+    {
+        //perform_thread = std::make_unique<std::thread>(perform, this);
+        for(std::size_t i = 0; i < low_watermark; ++i)
+        {
+            fprintf(stderr,"Create thread %d\n",i);
+            std::thread(&Executor::worker, this).detach();
+            ++thread_count;
+        }
+    }
+    void worker()
+    {
+        while(true)
+        {
+            std::unique_lock<std::mutex> lock(this->mutex);
+            fprintf(stderr,"While loop thread %d tasks %d\n", thread_count, tasks.size());
+            auto now = std::chrono::system_clock::now();
+            if(thread_count > low_watermark)
+            {
+                fprintf(stderr,"est lishnie\n");
+                empty_condition_or_stop.wait_until(lock, now + std::chrono::milliseconds(idle_time), [&](){return !(state == State::kRun && tasks.empty());});
+                fprintf(stderr,"!est lishnie\n");
+            }
+            else
+            {
+                fprintf(stderr,"net lishnie\n");
+                while(state == State::kRun && tasks.empty())
+                {
+                    empty_condition_or_stop.wait(lock);
+                }
+                fprintf(stderr,"!net lishnie\n");
+            }
+                fprintf(stderr,"check Go away\n");
+            if(tasks.empty() && (thread_count > low_watermark || state != State::kRun))
+            {
+                fprintf(stderr,"Go away\n");
+                break;
+            }
+            auto task = tasks.front();
+            tasks.pop_front();
+            ++worked_threads;
+            lock.unlock();
+            task();
+            lock.lock();
+            --worked_threads;
+
+        }
+        std::unique_lock<std::mutex> lock(this->mutex);
+        --thread_count;
+        if(!thread_count)
+        {
+            lock.unlock();
+            last_thread.notify_one();
+        }
+    }
+
+    ~Executor(){
+        fprintf(stderr,"Destructor start\n");
+        Stop(true);
+        fprintf(stderr,"Destructor end\n");
+    }
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -37,7 +104,22 @@ class Executor {
      *
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
-    void Stop(bool await = false);
+    void Stop(bool await = false)
+    {
+        std::unique_lock<std::mutex> lock(this->mutex);
+        state = State::kStopping;
+        empty_condition_or_stop.notify_all();
+
+        if(await)
+        {
+            while(thread_count>0){
+                last_thread.wait(lock);
+            }
+        }
+         
+        
+        state = State::kStopped;
+    }
 
     /**
      * Add function to be executed on the threadpool. Method returns true in case if task has been placed
@@ -54,10 +136,20 @@ class Executor {
         if (state != State::kRun) {
             return false;
         }
-
-        // Enqueue new task
+        fprintf(stderr, "Execute tasks:%d threads:%d \n", tasks.size(),thread_count);
+        if(thread_count >= hight_watermark && tasks.size() >= max_queue_size){
+            return false;
+        }
         tasks.push_back(exec);
-        empty_condition.notify_one();
+        if(!tasks.empty() && worked_threads == thread_count && thread_count < hight_watermark)
+        {
+            fprintf(stderr, "New pool\n");
+            std::thread(&Executor::worker, this).detach();
+            ++thread_count;
+        }
+        // Enqueue new task
+            fprintf(stderr, "Add to deque\n");
+        empty_condition_or_stop.notify_all();//поменять
         return true;
     }
 
@@ -68,10 +160,6 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
-    /**
-     * Main function that all pool threads are running. It polls internal task queue and execute tasks
-     */
-    friend void perform(Executor *executor);
 
     /**
      * Mutex to protect state below from concurrent modification
@@ -81,7 +169,8 @@ private:
     /**
      * Conditional variable to await new data in case of empty queue
      */
-    std::condition_variable empty_condition;
+    std::condition_variable empty_condition_or_stop;
+    std::condition_variable last_thread;
 
     /**
      * Vector of actual threads that perorm execution
@@ -96,7 +185,14 @@ private:
     /**
      * Flag to stop bg threads
      */
+    std::unique_ptr<std::thread> perform_thread;
     State state;
+    std::size_t low_watermark;
+    std::size_t hight_watermark;
+    std::size_t max_queue_size;
+    std::size_t idle_time;
+    std::size_t thread_count;
+    std::size_t worked_threads;
 };
 
 } // namespace Concurrency
