@@ -7,9 +7,9 @@
 #include <thread>
 
 #include "protocol/Parser.h"
+#include <afina/concurrency/Executor.h>
 #include <afina/execute/Command.h>
 #include <afina/network/Server.h>
-#include <afina/concurrency/Executor.h>
 
 namespace spdlog {
 class logger;
