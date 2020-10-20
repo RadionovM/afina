@@ -48,24 +48,38 @@ public:
         while (true) {
             std::unique_lock<std::mutex> lock(this->mutex);
             auto now = std::chrono::system_clock::now();
-            if (thread_count > low_watermark) {
-                empty_condition_or_stop.wait_until(lock, now + std::chrono::milliseconds(idle_time),
-                                                   [&]() { return !(state == State::kRun && tasks.empty()); });
-            } else {
-                while (state == State::kRun && tasks.empty()) {
-                    empty_condition_or_stop.wait(lock);
+            if (empty_condition_or_stop.wait_until(lock, now + std::chrono::milliseconds(idle_time), [&]() {
+                    return !(state == State::kRun && tasks.empty());
+                })) { //вышли по условию и оно true //либо остановка либо новая задача
+                if (state != State::kRun) {
+                    break;
                 }
-            }
-            if (tasks.empty() && (thread_count > low_watermark || state != State::kRun)) {
-                break;
+            } else // state == kRun  && tasks.empty
+            {
+                if (thread_count > low_watermark) {
+                    break; //удаляем ткущий поток
+                } else {
+                    continue;
+                }
             }
             auto task = tasks.front();
             tasks.pop_front();
             ++worked_threads;
             lock.unlock();
-            task();
-            lock.lock();
-            --worked_threads;
+            std::exception_ptr eptr;
+            try {
+                task();
+            } catch (...) {
+                lock.lock();
+                --worked_threads;
+                --thread_count;
+                if (!thread_count) {
+                    last_thread.notify_one();
+                }
+                lock.unlock();
+                fprintf(stderr, "Unknown exception, abort\n");
+                std::abort(); // or rethrow above
+            }
         }
         std::unique_lock<std::mutex> lock(this->mutex);
         --thread_count;
@@ -109,14 +123,11 @@ public:
         auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
         std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
-            return false;
-        }
-        if (thread_count >= hight_watermark && tasks.size() >= max_queue_size) {
+        if (state != State::kRun || tasks.size() >= max_queue_size) {
             return false;
         }
         tasks.push_back(exec);
-        if (!tasks.empty() && worked_threads == thread_count && thread_count < hight_watermark) {
+        if (worked_threads == thread_count && thread_count < hight_watermark) {
             std::thread(&Executor::worker, this).detach();
             ++thread_count;
         }

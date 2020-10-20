@@ -76,7 +76,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
 
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
-    thread_pool.reset(new Afina::Concurrency::Executor(2, 8, 10, 1000));
+    thread_pool.reset(new Afina::Concurrency::Executor(2, 8, 10, 3000));
 }
 
 // See Server.h
@@ -161,7 +161,6 @@ void ServerImpl::OnRun() {
 }
 
 void ServerImpl::client_worker(int client_socket) {
-
     // Process new connection:
     // - read commands until socket alive
     // - execute each command
